@@ -1,0 +1,13 @@
+[project]
+name = "skill-importance-project"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "ipykernel>=6.29.5",
+    "langchain>=0.3.19",
+    "langchain-openai>=0.3.7",
+    "numpy>=1.26.4",
+    "python-dotenv>=1.0.1",
+]
