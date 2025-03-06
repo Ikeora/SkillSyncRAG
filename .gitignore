@@ -5,6 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
+folder_structure.py
 
 # Virtual environments
 .venv
