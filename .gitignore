@@ -6,6 +6,7 @@ dist/
 wheels/
 *.egg-info
 folder_structure.py
+streamfinal.py
 
 # Virtual environments
 .venv
