@@ -1,0 +1,1 @@
+{"query": "data engineer", "location": "United States", "autoTranslateLocation": "true", "remoteOnly": "false", "employmentTypes": "fulltime;parttime;intern;contractor"}
