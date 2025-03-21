@@ -9,6 +9,12 @@ from pydantic import BaseModel
 from typing import List
 import pandas as pd
 
+db = Chroma(
+    persist_directory=persistent_directory,
+    embedding_function=embeddings,
+    collection_name="jobs_collection"  # Match the name used in push
+    )
+
 # Pydantic model to structure the skills and their importance
 class SkillData(BaseModel):
     skill: str
@@ -17,16 +23,10 @@ class SkillData(BaseModel):
 class SkillsResponse(BaseModel):
     skills: List[SkillData]
 
+
+
 # Function to retrieve job postings (e.g., ChromaDB vector store)
 def retrieve_job_postings(query, vector_store):
-    db = Chroma(
-    persist_directory=persistent_directory,
-    embedding_function=embeddings,
-    collection_name="jobs_collection"  # Match the name used in push
-    )
-
-    # Define the user's question
-    query = "What are the top skills I need to get a data scientist job?"
 
     # Retrieve relevant documents based on the query
     retriever = db.as_retriever(
@@ -37,15 +37,6 @@ def retrieve_job_postings(query, vector_store):
     # `score_threshold`: Similarity score from text document to query
     relevant_docs = retriever.invoke(query)
 
-
-'''
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=ChatOpenAI(model="gpt-4"),
-        chain_type="stuff",
-        retriever=vector_store.as_retriever()
-    )
-    response = qa_chain.run(query)
-    return response  # Returns the relevant job posting text(s)'''
 
 # Function to extract skills from the job posting dynamically (LLM-based)
 def extract_skills_from_job_posting(job_posting: str) -> SkillsResponse:
