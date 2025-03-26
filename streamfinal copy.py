@@ -1,13 +1,32 @@
 import streamlit as st
 import matplotlib.pyplot as plt
 from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import Chroma
-from langchain.chat_models import ChatOpenAI
+from langchain_community.vectorstores import Chroma
+from langchain_community.chat_models import ChatOpenAI
 from langchain.chains import RetrievalQA
 from langchain.agents import initialize_agent, Tool, AgentType
+from langchain.prompts import PromptTemplate
 from pydantic import BaseModel
 from typing import List
 import pandas as pd
+import json 
+import os
+import re
+from dotenv import load_dotenv
+load_dotenv()
+
+DATABASE=r"C:\Users\ekene\OneDrive\Documents\DataScienceProjects\skill-importance-project\prototype\db\chroma_db_with_metadata"
+persistent_directory=DATABASE
+
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-mpnet-base-v2"
+)
+
+db = Chroma(
+    persist_directory=persistent_directory,
+    embedding_function=embeddings,
+    collection_name="jobs_collection"  # Match the name used in push
+    )
 
 # Pydantic model to structure the skills and their importance
 class SkillData(BaseModel):
@@ -17,28 +36,70 @@ class SkillData(BaseModel):
 class SkillsResponse(BaseModel):
     skills: List[SkillData]
 
+
+def should_plot(query: str) -> bool:
+    plot_keywords = ["plot", "graph", "visualize", "chart", "show","display"]
+    return any(keyword in query.lower() for keyword in plot_keywords)
+
 # Function to retrieve job postings (e.g., ChromaDB vector store)
-def retrieve_job_postings(query, vector_store):
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=ChatOpenAI(model="gpt-4"),
-        chain_type="stuff",
-        retriever=vector_store.as_retriever()
+def retrieve_job_postings(query, db):
+
+    # Retrieve relevant documents based on the query
+    retriever = db.as_retriever(
+        search_type="similarity_score_threshold",
+        search_kwargs={"k": 20, "score_threshold": 0.25}
     )
-    response = qa_chain.run(query)
-    return response  # Returns the relevant job posting text(s)
+    relevant_docs = retriever.invoke(query)
+    
+    # Inspect the structure of the returned documents
+    if relevant_docs:
+        # Print the first document to understand its structure
+        st.write("Document structure:", relevant_docs[0])
+    
+    # Adjust this line based on the actual attribute that contains the text
+    return '\n'.join([doc.page_content for doc in relevant_docs])  # Replace 'text' with the correct attribute
+
+
 
 # Function to extract skills from the job posting dynamically (LLM-based)
 def extract_skills_from_job_posting(job_posting: str) -> SkillsResponse:
-    prompt = f"Extract the top skills for the following job posting and their importance (on a scale from 1 to 100):\n\n{job_posting}\n\nReturn the skills in this format: [{{'skill': 'Skill Name', 'importance': 95}}, ...]"
-    
+    # Define the prompt template
+    template = """
+    Extract the top skills from all jobs provided and their importance (on a scale from 1 to 100):
+
+    {job_posting}
+
+    Return the skills in this format: [{{'skill': 'Skill Name', 'importance': 95}}, ...]
+    """
+    # Create a PromptTemplate instance
+    prompt_template = PromptTemplate(
+        input_variables=["job_posting"],  # Define the placeholder(s)
+        template=template
+    )
+    prompt = prompt_template.format(job_posting=job_posting)
+
+
     # Use the LLM (ChatGPT) to extract the skills and importance scores
-    response = ChatOpenAI(model="gpt-4").run(prompt)
-    
+    response = ChatOpenAI(model="gpt-4o").invoke(prompt)
+
     # Parse the response into structured data (SkillsResponse format)
-    skills_data = eval(response)  # Convert the string response into a list of dicts
+    pattern = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
+    match = pattern.search(response.content)
+    if match:
+        json_str = match.group(1) # This is the JSON string
+        try:
+            json_str=json_str.replace("'", '"')
+            skills_data = json.loads(json_str) # Convert JSON string to Python object (list of dicts)
+        except json.JSONDecodeError as e:
+            print("JSON decode error:", e)
+    else:
+        print("No JSON content was found.")
     
     # Validate and structure the data using Pydantic
-    structured_skills = SkillsResponse.parse_obj({"skills": [SkillData(skill=skill['skill'], importance=skill['importance']) for skill in skills_data]})
+    structured_skills = SkillsResponse.model_validate({"skills": 
+                                                       [SkillData(skill=skill['skill'], 
+                                                                  importance=skill['importance']) 
+                                                                  for skill in skills_data]})
     
     return structured_skills
 
@@ -72,15 +133,15 @@ plot_tool = Tool(
     description="Generates a plot of the top skills required for the job role."
 )
 
-query_tool = Tool(
+""" query_tool = Tool(
     name="Job Query Responder",
     func=retrieve_job_postings,
     description="Responds with relevant job postings based on the query."
-)
+) """
 
 # Set up LangChain agent
-llm = ChatOpenAI(model="gpt-4")
-tools = [extract_skills_tool, plot_tool, query_tool]
+llm = ChatOpenAI(model="gpt-4o")
+tools = [extract_skills_tool, plot_tool]
 
 # Initialize agent with tools
 agent = initialize_agent(tools, llm, agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
@@ -88,7 +149,17 @@ agent = initialize_agent(tools, llm, agent_type=AgentType.ZERO_SHOT_REACT_DESCRI
 # Streamlit input for query
 query = st.text_input("Ask a question:")
 
+
 if query:
-    # Use the agent to choose which tools to use based on the query
-    response = agent.run(query)
-    st.write(response)
+    # Retrieve job postings
+    job_postings = retrieve_job_postings(query, db)
+    
+    # Extract skills if needed
+    if should_plot(query):
+        skills_response = extract_skills_from_job_posting(job_postings)
+        plot_skills(skills_response)
+    else:
+        # Use the LLM to provide a textual response
+        response = llm.invoke(query)
+        st.write(response.content)
+
